@@ -1,4 +1,4 @@
-export type DataSource = 'live' | 'cached' | 'offline';
+﻿export type DataSource = 'live' | 'cached' | 'offline';
 
 export type ApiResult<T> = {
   data: T;
@@ -46,35 +46,7 @@ function normalizePackage(raw: any): PackageRecord {
   };
 }
 
-function normalizeTransactions(raw: any[]): TransactionRecord[] {
-  return (raw || []).map((tx) => ({
-    id: tx.id || crypto.randomUUID(),
-    status: tx.status || 'PENDING',
-    amount: Number(tx.amount) || 0,
-    currency: tx.currency || 'KES',
-    phone: tx.phone || '',
-    checkoutRequestId: tx.checkoutRequestId ?? null,
-    mpesaReceipt: tx.mpesaReceipt ?? null,
-    packageName: tx.packageName ?? null,
-    createdAt: tx.createdAt || new Date().toISOString(),
-  }));
-}
 
-function normalizeUsers(raw: any[]): UserRecord[] {
-  return (raw || []).map((user) => ({
-    id: user.id || crypto.randomUUID(),
-    name: user.name || 'Unknown User',
-    phone: user.phone || '',
-    email: user.email ?? null,
-    macAddress: user.macAddress ?? null,
-    ipAddress: user.ipAddress ?? null,
-    packageName: user.packageName ?? null,
-    remainingSeconds: user.remainingSeconds ?? 0,
-    dataUsedMB: user.dataUsedMB ?? 0,
-    paymentStatus: user.paymentStatus || 'PENDING',
-    sessionId: user.sessionId ?? null,
-  }));
-}
 
 function normalizeRouter(raw: any): RouterStatus {
   return {
@@ -94,16 +66,6 @@ function normalizeHealth(raw: any): Health {
   };
 }
 
-function normalizeSupport(raw: any[]): SupportMessage[] {
-  return (raw || []).map((msg) => ({
-    id: msg.id || crypto.randomUUID(),
-    phone: msg.phone || '',
-    transactionCode: msg.transactionCode ?? null,
-    message: msg.message || '',
-    createdAt: msg.createdAt || new Date().toISOString(),
-    userName: msg.userName || 'Unknown',
-  }));
-}
 
 function normalizePackages(payload: unknown): PackageRecord[] {
   const list = isRecord(payload) && Array.isArray(payload.packages) ? payload.packages : [];
@@ -123,7 +85,7 @@ function normalizeTransactions(payload: unknown): TransactionRecord[] {
     const record = isRecord(item) ? item : {};
     const packageValue = isRecord(record.package) ? record.package.name : record.packageName;
     const status = record.status === 'COMPLETED' || record.status === 'FAILED' || record.status === 'REVERSED' ? record.status : 'PENDING';
-    return { id: String(record.id || crypto.randomUUID()), status, amount: numeric(record.amount), currency: String(record.currency || 'KES'), phone: String(record.phone || '—'), checkoutRequestId: typeof record.checkoutRequestId === 'string' ? record.checkoutRequestId : null, mpesaReceipt: typeof record.mpesaReceipt === 'string' ? record.mpesaReceipt : null, packageName: String(packageValue || 'Unknown package'), createdAt: String(record.createdAt || new Date().toISOString()) };
+    return { id: String(record.id || crypto.randomUUID()), status, amount: numeric(record.amount), currency: String(record.currency || 'KES'), phone: String(record.phone || 'â€”'), checkoutRequestId: typeof record.checkoutRequestId === 'string' ? record.checkoutRequestId : null, mpesaReceipt: typeof record.mpesaReceipt === 'string' ? record.mpesaReceipt : null, packageName: String(packageValue || 'Unknown package'), createdAt: String(record.createdAt || new Date().toISOString()) };
   });
 }
 
@@ -131,7 +93,7 @@ function normalizeUsers(payload: unknown): UserRecord[] {
   const list = isRecord(payload) && Array.isArray(payload.users) ? payload.users : Array.isArray(payload) ? payload : [];
   return list.map((item): UserRecord => {
     const record = isRecord(item) ? item : {};
-    return { id: String(record.id || crypto.randomUUID()), name: String(record.name || record.email || 'Unknown user'), phone: String(record.phone || '—'), email: String(record.email || '—'), macAddress: typeof record.macAddress === 'string' ? record.macAddress : null, ipAddress: typeof record.ipAddress === 'string' ? record.ipAddress : null, packageName: String(record.packageName || 'No active package'), remainingSeconds: numeric(record.remainingSeconds), dataUsedMB: numeric(record.dataUsedMB), paymentStatus: record.paymentStatus === 'COMPLETED' || record.paymentStatus === 'FAILED' || record.paymentStatus === 'REVERSED' ? record.paymentStatus : 'PENDING', sessionId: typeof record.sessionId === 'string' ? record.sessionId : null };
+    return { id: String(record.id || crypto.randomUUID()), name: String(record.name || record.email || 'Unknown user'), phone: String(record.phone || 'â€”'), email: String(record.email || 'â€”'), macAddress: typeof record.macAddress === 'string' ? record.macAddress : null, ipAddress: typeof record.ipAddress === 'string' ? record.ipAddress : null, packageName: String(record.packageName || 'No active package'), remainingSeconds: numeric(record.remainingSeconds), dataUsedMB: numeric(record.dataUsedMB), paymentStatus: record.paymentStatus === 'COMPLETED' || record.paymentStatus === 'FAILED' || record.paymentStatus === 'REVERSED' ? record.paymentStatus : 'PENDING', sessionId: typeof record.sessionId === 'string' ? record.sessionId : null };
   });
 }
 
@@ -143,7 +105,7 @@ function normalizeSupport(payload: unknown): SupportMessage[] {
     const user = isRecord(record.user) ? record.user : {};
     return {
       id: String(record.id || crypto.randomUUID()),
-      phone: String(metadata.phone || user.phone || '—'),
+      phone: String(metadata.phone || user.phone || 'â€”'),
       transactionCode: typeof metadata.transactionCode === 'string' ? metadata.transactionCode : null,
       message: String(metadata.message || record.action || 'No message content'),
       createdAt: String(record.createdAt || new Date().toISOString()),
@@ -152,26 +114,6 @@ function normalizeSupport(payload: unknown): SupportMessage[] {
   });
 }
 
-async function request<T>(path: string, fallback: T, attempts = 2): Promise<ApiResult<T>> {
-  let lastError = 'Request failed';
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 7000);
-    try {
-      const token = window.localStorage.getItem('admin-token') || process.env.NEXT_PUBLIC_ADMIN_TOKEN;
-      const response = await fetch(`${baseUrl()}${path}`, { signal: controller.signal, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json() as T;
-      return { data, source: 'live' };
-    } catch (error: unknown) {
-      lastError = error instanceof Error ? error.message : 'Request failed';
-      if (attempt + 1 < attempts) await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)));
-    } finally {
-      window.clearTimeout(timeout);
-    }
-  }
-  return { data: fallback, source: 'offline', error: lastError };
-}
 
 function baseUrl(): string {
   return DEFAULT_BASE_URL.replace(/\/+$/, '');
@@ -320,3 +262,4 @@ export function isSourceLive(result: ApiResult<any>): result is ApiResult<any> &
 export function hasError(result: ApiResult<any>): boolean {
   return !!result.error;
 }
+
