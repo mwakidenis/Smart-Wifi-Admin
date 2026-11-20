@@ -134,7 +134,47 @@ function normalizeOverview(payload: unknown): Overview {
   };
 }
 
+function normalizeTransactions(payload: unknown): TransactionRecord[] {
+  const list = isRecord(payload) && Array.isArray(payload.transactions) ? payload.transactions : Array.isArray(payload) ? payload : [];
+  return list.map((item, idx) => {
+    const record = isRecord(item) ? item : {};
+    const rawStatus = asString(record.status, 'PENDING').toUpperCase();
+    const status: TransactionRecord['status'] =
+      rawStatus === 'COMPLETED' || rawStatus === 'FAILED' ? rawStatus : 'PENDING';
+    return {
+      id: asString(record.id, `tx_${idx}`),
+      status,
+      amount: asNumber(record.amount),
+      currency: asString(record.currency, 'KES'),
+      phone: asString(record.phone),
+      checkoutRequestId: asString(record.checkoutRequestId) || undefined,
+      mpesaReceipt: asString(record.mpesaReceipt) || undefined,
+      packageName: asString(record.packageName, 'Standard Plan'),
+      createdAt: asString(record.createdAt, new Date().toISOString()),
+    };
+  });
+}
 
+function normalizeUsers(payload: unknown): UserRecord[] {
+  const list = isRecord(payload) && Array.isArray(payload.users) ? payload.users : Array.isArray(payload) ? payload : [];
+  return list.map((item, idx) => {
+    const record = isRecord(item) ? item : {};
+    const rawStatus = asString(record.paymentStatus, 'PENDING').toUpperCase();
+    const paymentStatus: UserRecord['paymentStatus'] =
+      rawStatus === 'COMPLETED' || rawStatus === 'FAILED' ? rawStatus : 'PENDING';
+    return {
+      id: asString(record.id, `usr_${idx}`),
+      name: asString(record.name, 'Subscriber'),
+      phone: asString(record.phone),
+      macAddress: asString(record.macAddress) || undefined,
+      ipAddress: asString(record.ipAddress) || undefined,
+      packageName: asString(record.packageName, 'Standard Plan'),
+      dataUsedMB: asNumber(record.dataUsedMB),
+      remainingSeconds: asNumber(record.remainingSeconds),
+      paymentStatus,
+    };
+  });
+}
 
 function normalizePackages(payload: unknown): PackageRecord[] {
   const list = isRecord(payload) && Array.isArray(payload.packages) ? payload.packages : Array.isArray(payload) ? payload : [];
@@ -176,7 +216,41 @@ function normalizeHealth(payload: unknown): Health {
   };
 }
 
+function normalizeSupport(payload: unknown): SupportMessage[] {
+  const list = isRecord(payload) && Array.isArray(payload.supportMessages) ? payload.supportMessages : Array.isArray(payload) ? payload : [];
+  return list.map((item, idx) => {
+    const record = isRecord(item) ? item : {};
+    return {
+      id: asString(record.id, `sup_${idx}`),
+      userName: asString(record.userName, 'User'),
+      phone: asString(record.phone),
+      transactionCode: asString(record.transactionCode) || undefined,
+      message: asString(record.message),
+      createdAt: asString(record.createdAt, new Date().toISOString()),
+    };
+  });
+}
 
+async function request<T>(path: string, fallback: T, attempts = DEFAULT_RETRIES): Promise<ApiResult<T>> {
+  let lastError = 'Request failed';
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+      if (!response.ok) {
+        lastError = `HTTP ${response.status}`;
+      } else {
+        const json: unknown = await response.json();
+        return { data: json as T, source: 'live' };
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : 'Network error';
+    }
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, DEFAULT_RETRY_DELAY * (attempt + 1)));
+    }
+  }
+  return { data: fallback, source: 'offline', error: lastError };
+}
 
 export async function fetchOverview(): Promise<ApiResult<Overview>> {
   const res = await request<unknown>('/admin/overview', fallbackOverview);
@@ -239,4 +313,3 @@ export function formatDuration(seconds: number): string {
   if (hours > 0) return `${hours}h ${mins}m`;
   return `${mins}m`;
 }
-
