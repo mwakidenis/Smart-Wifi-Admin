@@ -1,7 +1,7 @@
-import create from 'zustand';
+﻿import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { AdminSnapshot } from './admin-api';
 
-// Types for persisted state
 export type UserSession = {
   userId: string;
   phone: string;
@@ -14,68 +14,35 @@ export type UserSession = {
 };
 
 export type AdminState = {
-  // Session management
   userSession: UserSession | null;
   setUserSession: (session: UserSession | null) => void;
-
-  // Package/balance state
   packageBalance: number;
   setPackageBalance: (amount: number) => void;
-
-  // Payment confirmation
-  lastTransaction: {
-    checkoutRequestId: string;
-    mpesaReceipt: string;
-    amount: number;
-    status: 'PENDING' | 'COMPLETED' | 'FAILED';
-    timestamp: string;
-  } | null;
-  setLastTransaction: (tx: {
-    checkoutRequestId: string;
-    mpesaReceipt: string;
-    amount: number;
-    status: 'PENDING' | 'COMPLETED' | 'FAILED';
-    timestamp: string;
-  } | null) => void;
-
-  // UI state
-  isSidebarOpen: boolean;
-  setIsSidebarOpen: (open: boolean) => void;
-
-  // Status indicators
-  isOnline: boolean;
-  setIsOnline: (online: boolean) => void;
+  search: string;
+  setSearch: (q: string) => void;
+  snapshot: AdminSnapshot | null;
+  initializeSnapshot: (next: AdminSnapshot) => void;
 };
 
-// Create persisted store
-const useStore = create(
-  persist<AdminState>(
+export const useStore = create<AdminState>()(
+  persist(
     (set) => ({
       userSession: null,
-      setUserSession: (session: UserSession | null) => set({ userSession: session }),
-
+      setUserSession: (userSession) => set({ userSession }),
       packageBalance: 0,
-      setPackageBalance: (amount: number) => set({ packageBalance: amount }),
-
-      lastTransaction: null,
-      setLastTransaction: (tx: {
-        checkoutRequestId: string;
-        mpesaReceipt: string;
-        amount: number;
-        status: 'PENDING' | 'COMPLETED' | 'FAILED';
-        timestamp: string;
-      } | null) => set({ lastTransaction: tx }),
-
-      isSidebarOpen: false,
-      setIsSidebarOpen: (open: boolean) => set({ isSidebarOpen: open }),
-
-      isOnline: true,
-      setIsOnline: (online: boolean) => set({ isOnline: online }),
+      setPackageBalance: (packageBalance) => set({ packageBalance }),
+      search: '',
+      setSearch: (search) => set({ search }),
+      snapshot: null,
+      initializeSnapshot: (snapshot) => set({ snapshot }),
     }),
     {
-      name: 'smart-wifi-admin-storage',
+      name: 'smart-wifi-admin-store',
+      partialize: (state) => ({
+        userSession: state.userSession,
+        packageBalance: state.packageBalance,
+        search: state.search,
+      }),
     }
-  ),
+  )
 );
-
-export default useStore;
