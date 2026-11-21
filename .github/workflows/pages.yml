@@ -34,6 +34,8 @@ jobs:
         run: npx next typegen
 
       - name: Build static site
+        env:
+          NEXT_PUBLIC_API_URL: https://smart-wifi-api.mwakidenice.workers.dev
         run: npm run build
 
       - name: Disable Jekyll processing
