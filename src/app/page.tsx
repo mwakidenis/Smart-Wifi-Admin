@@ -909,7 +909,12 @@ function PackagesView({
                   <div className="mt-1 text-slate-300">{packageItem.maxDevices}</div>
                 </div>
               </div>
-              <button className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 py-2 text-sm text-slate-300 hover:border-electric/40 hover:text-white">
+              <button
+                type="button"
+                onClick={() => onManage(packageItem)}
+                className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 py-2 text-sm text-slate-300 cursor-pointer hover:border-electric/40 hover:text-white"
+                aria-label={`Manage ${packageItem.name} package`}
+              >
                 <Settings2 className="h-4 w-4" />
                 manage package
               </button>
