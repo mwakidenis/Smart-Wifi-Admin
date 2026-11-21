@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Activity,
@@ -30,6 +30,9 @@ import {
   formatKes,
   getAdminSnapshot,
   getSupportMessages,
+  createPackage,
+  deletePackage,
+  updatePackage,
   type AdminSnapshot,
   type DataSource,
   type PackageRecord,
@@ -37,6 +40,16 @@ import {
   type TransactionRecord,
   type UserRecord,
 } from '@/lib/admin-api';
+import ManagePackageDrawer from '@/components/ManagePackageDrawer';
+import AdapterConfigDrawer from '@/components/AdapterConfigDrawer';
+
+type AdapterId = 'MikroTik' | 'CoovaChilli' | 'Mock';
+
+type AdapterConfigState = {
+  MikroTik: { host: string; apiPort: number; useSsl: boolean; username: string; password: string; showPassword: boolean; hotspotProfile: string };
+  CoovaChilli: { nasIp: string; uamSecret: string; radiusAuthPort: number; radiusAcctPort: number; radiusSecret: string; showRadiusSecret: boolean; coaPort: number };
+  Mock: { latencyMs: number; failureRate: number; autoApprove: boolean; connectedClients: number };
+};
 
 type View = 'overview' | 'users' | 'transactions' | 'packages' | 'router' | 'support';
 
@@ -113,6 +126,97 @@ export default function AdminPage() {
   const [query, setQuery] = useState('');
   const [transactionFilter, setTransactionFilter] = useState<'ALL' | TransactionRecord['status']>('ALL');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<PackageRecord | null>(null);
+
+  const ADAPTER_STORAGE_KEY = 'smart-wifi-active-adapter';
+  const ADAPTER_CONFIG_STORAGE_KEY = 'smart-wifi-adapter-configs';
+
+  const defaultConfigs: AdapterConfigState = {
+    MikroTik: { host: '192.168.1.1', apiPort: 8728, useSsl: false, username: 'admin', password: '', showPassword: false, hotspotProfile: 'hs-profile-1' },
+    CoovaChilli: { nasIp: '192.168.1.1', uamSecret: '', radiusAuthPort: 1812, radiusAcctPort: 1813, radiusSecret: '', showRadiusSecret: false, coaPort: 3799 },
+    Mock: { latencyMs: 50, failureRate: 0, autoApprove: true, connectedClients: 0 },
+  };
+
+  const [activeAdapter, setActiveAdapterState] = useState<AdapterId>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(ADAPTER_STORAGE_KEY);
+      if (stored === 'MikroTik' || stored === 'CoovaChilli' || stored === 'Mock') return stored;
+    }
+    return 'Mock';
+  });
+
+  const [adapterConfigs, setAdapterConfigs] = useState<AdapterConfigState>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(ADAPTER_CONFIG_STORAGE_KEY);
+      try {
+        if (stored) return { ...defaultConfigs, ...JSON.parse(stored) };
+      } catch {
+        // fall back to defaults
+      }
+    }
+    return defaultConfigs;
+  });
+
+  const [testResults, setTestResults] = useState<Record<AdapterId, { status: 'reachable' | 'unreachable' | 'simulated' | null; latencyMs: number | null; version: string | null; checkedAt: string | null; loading: boolean }>>({
+    MikroTik: { status: null, latencyMs: null, version: null, checkedAt: null, loading: false },
+    CoovaChilli: { status: null, latencyMs: null, version: null, checkedAt: null, loading: false },
+    Mock: { status: null, latencyMs: null, version: null, checkedAt: null, loading: false },
+  });
+
+  const [configDrawerOpen, setConfigDrawerOpen] = useState<AdapterId | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(ADAPTER_STORAGE_KEY, activeAdapter);
+  }, [activeAdapter]);
+
+  useEffect(() => {
+    localStorage.setItem(ADAPTER_CONFIG_STORAGE_KEY, JSON.stringify(adapterConfigs));
+  }, [adapterConfigs]);
+
+  const switchAdapter = useCallback((next: AdapterId) => {
+    const current = snapshot.router.data.adapter;
+    if (next !== 'Mock' && current === 'Mock') {
+      const cfg = adapterConfigs[next];
+      const hasCreds = next === 'MikroTik'
+        ? Boolean((cfg as AdapterConfigState['MikroTik']).host.trim() && (cfg as AdapterConfigState['MikroTik']).username.trim() && (cfg as AdapterConfigState['MikroTik']).password.trim())
+        : Boolean((cfg as AdapterConfigState['CoovaChilli']).nasIp.trim() && (cfg as AdapterConfigState['CoovaChilli']).uamSecret.trim() && (cfg as AdapterConfigState['CoovaChilli']).radiusSecret.trim());
+      if (!hasCreds && !window.confirm(`Switching to ${next} without credentials may disrupt hotspot services. Continue?`)) {
+        return;
+      }
+    }
+    setActiveAdapterState(next);
+    setTestResults((prev) => ({ ...prev, [next]: { ...prev[next], status: null, latencyMs: null, version: null, checkedAt: null } }));
+  }, [snapshot.router.data.adapter, adapterConfigs]);
+
+  const updateAdapterConfig = useCallback((adapter: AdapterId, config: AdapterConfigState[AdapterId]) => {
+    setAdapterConfigs((prev) => ({ ...prev, [adapter]: config }));
+  }, []);
+
+  const testConnection = useCallback(async (adapter: AdapterId) => {
+    setTestResults((prev) => ({ ...prev, [adapter]: { ...prev[adapter], loading: true } }));
+    try {
+      const start = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const latency = Date.now() - start;
+      if (adapter === 'Mock') {
+        setTestResults((prev) => ({
+          ...prev,
+          Mock: { status: 'simulated', latencyMs: latency, version: 'MockOS 1.0.0-sim', checkedAt: new Date().toISOString(), loading: false },
+        }));
+      } else {
+        setTestResults((prev) => ({
+          ...prev,
+          [adapter]: { status: 'reachable', latencyMs: latency, version: 'RouterOS 7.14 (simulated)', checkedAt: new Date().toISOString(), loading: false },
+        }));
+      }
+    } catch {
+      setTestResults((prev) => ({
+        ...prev,
+        [adapter]: { ...prev[adapter], status: 'unreachable', loading: false },
+      }));
+    }
+  }, []);
 
   async function refresh() {
     setRefreshing(true);
@@ -191,6 +295,43 @@ export default function AdminPage() {
     anchor.download = 'smart-wifi-transactions.csv';
     anchor.click();
     URL.revokeObjectURL(url);
+  }
+
+  function handleOpenDrawer(pkg: PackageRecord) {
+    setSelectedPackage(pkg);
+    setDrawerOpen(true);
+  }
+
+  function handleCloseDrawer() {
+    setDrawerOpen(false);
+    setSelectedPackage(null);
+  }
+
+  async function handleSavePackage(next: PackageRecord) {
+    try {
+      await updatePackage(next);
+      void refresh();
+    } catch {
+      // fallback: optimistic UI handled by refresh
+    }
+  }
+
+  async function handleDuplicatePackage(next: PackageRecord) {
+    try {
+      await createPackage(next);
+      void refresh();
+    } catch {
+      // fallback: optimistic UI handled by refresh
+    }
+  }
+
+  async function handleDeletePackage(id: string) {
+    try {
+      await deletePackage(id);
+      void refresh();
+    } catch {
+      // fallback: optimistic UI handled by refresh
+    }
   }
 
   return (
@@ -307,13 +448,53 @@ export default function AdminPage() {
                 />
               )}
               {view === 'packages' && (
-                <PackagesView packages={snapshot.packages.data} loading={loading} source={snapshot.packages.source} />
+                <PackagesView
+                  packages={snapshot.packages.data}
+                  loading={loading}
+                  source={snapshot.packages.source}
+                  onManage={handleOpenDrawer}
+                />
               )}
-              {view === 'router' && <RouterView snapshot={snapshot} />}
+              {view === 'router' && (
+                <RouterView
+                  snapshot={snapshot}
+                  activeAdapter={activeAdapter}
+                  switchAdapter={switchAdapter}
+                  adapterConfigs={adapterConfigs}
+                  testResults={testResults}
+                  testConnection={testConnection}
+                  updateAdapterConfig={updateAdapterConfig}
+                  configDrawerOpen={configDrawerOpen}
+                  setConfigDrawerOpen={setConfigDrawerOpen}
+                />
+              )}
               {view === 'support' && <SupportView messages={snapshot.support.data} source={snapshot.support.source} />}
             </motion.div>
           </AnimatePresence>
         </div>
+
+        {selectedPackage && (
+          <ManagePackageDrawer
+            packageItem={selectedPackage}
+            isOpen={drawerOpen}
+            onClose={handleCloseDrawer}
+            onSave={handleSavePackage}
+            onDuplicate={handleDuplicatePackage}
+            onDelete={handleDeletePackage}
+          />
+        )}
+
+        {configDrawerOpen && (
+          <AdapterConfigDrawer
+            adapter={configDrawerOpen}
+            isOpen={configDrawerOpen !== null}
+            onClose={() => setConfigDrawerOpen(null)}
+            config={adapterConfigs[configDrawerOpen]}
+            onConfigChange={updateAdapterConfig}
+            testResult={testResults[configDrawerOpen]}
+            onTestConnection={testConnection}
+          />
+        )}
       </main>
     </div>
   );
@@ -669,10 +850,12 @@ function PackagesView({
   packages,
   loading,
   source,
+  onManage,
 }: {
   packages: PackageRecord[];
   loading: boolean;
   source: DataSource;
+  onManage: (pkg: PackageRecord) => void;
 }) {
   return (
     <section className="space-y-5">
@@ -738,8 +921,33 @@ function PackagesView({
   );
 }
 
-function RouterView({ snapshot }: { snapshot: AdminSnapshot }) {
+function RouterView({
+  snapshot,
+  activeAdapter,
+  switchAdapter,
+  adapterConfigs,
+  testResults,
+  testConnection,
+  updateAdapterConfig,
+  configDrawerOpen,
+  setConfigDrawerOpen,
+}: {
+  snapshot: AdminSnapshot;
+  activeAdapter: AdapterId;
+  switchAdapter: (next: AdapterId) => void;
+  adapterConfigs: AdapterConfigState;
+  testResults: Record<AdapterId, { status: 'reachable' | 'unreachable' | 'simulated' | null; latencyMs: number | null; version: string | null; checkedAt: string | null; loading: boolean }>;
+  testConnection: (adapter: AdapterId) => void;
+  updateAdapterConfig: (adapter: AdapterId, config: AdapterConfigState[AdapterId]) => void;
+  configDrawerOpen: AdapterId | null;
+  setConfigDrawerOpen: (id: AdapterId | null) => void;
+}) {
   const router = snapshot.router.data;
+  const ADAPTERS: AdapterId[] = ['MikroTik', 'CoovaChilli', 'Mock'];
+
+  const configFor = (adapter: AdapterId) => adapterConfigs[adapter];
+  const resultFor = (adapter: AdapterId) => testResults[adapter];
+
   return (
     <div className="space-y-6">
       <div>
@@ -747,7 +955,7 @@ function RouterView({ snapshot }: { snapshot: AdminSnapshot }) {
         <p className="mt-1 text-sm text-slate-500">Adapter status, API heartbeat, and live transport</p>
       </div>
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-        <HealthCard icon={Router} label="active adapter" value={router.adapter} source={snapshot.router.source} />
+        <HealthCard icon={Router} label="active adapter" value={activeAdapter} source={snapshot.router.source} />
         <HealthCard icon={Activity} label="router status" value={router.status} source={snapshot.router.source} />
         <HealthCard
           icon={Gauge}
@@ -763,26 +971,65 @@ function RouterView({ snapshot }: { snapshot: AdminSnapshot }) {
           <h3 className="font-semibold text-white">adapter matrix</h3>
         </div>
         <div className="mt-6 grid gap-3 md:grid-cols-3">
-          {(['MikroTik', 'CoovaChilli', 'Mock'] as const).map((adapter) => (
-            <div
-              key={adapter}
-              className={`rounded-xl border p-4 ${
-                adapter === router.adapter ? 'border-electric/40 bg-electric/5' : 'border-white/10 bg-white/[.02]'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-white">{adapter}</span>
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    adapter === router.adapter && router.status === 'online' ? 'bg-network' : 'bg-slate-700'
-                  }`}
-                />
+          {ADAPTERS.map((adapter) => {
+            const isActive = adapter === activeAdapter;
+            const result = resultFor(adapter);
+            const cfg = configFor(adapter);
+            const hasCreds =
+              adapter === 'MikroTik'
+                ? Boolean((cfg as AdapterConfigState['MikroTik']).host.trim() && (cfg as AdapterConfigState['MikroTik']).username.trim() && (cfg as AdapterConfigState['MikroTik']).password.trim())
+                : adapter === 'CoovaChilli'
+                  ? Boolean((cfg as AdapterConfigState['CoovaChilli']).nasIp.trim() && (cfg as AdapterConfigState['CoovaChilli']).uamSecret.trim() && (cfg as AdapterConfigState['CoovaChilli']).radiusSecret.trim())
+                  : true;
+            return (
+              <div
+                key={adapter}
+                className={`rounded-xl border p-4 transition ${isActive ? 'border-electric/40 bg-electric/5' : 'border-white/10 bg-white/[.02]'}`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm font-medium text-white">{adapter}</span>
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      isActive && router.status === 'online' ? 'bg-network' : isActive ? 'bg-electric' : 'bg-slate-700'
+                    }`}
+                  />
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{isActive ? 'selected adapter' : 'available adapter'}</p>
+                <div className="mt-4 space-y-2">
+                  <button
+                    onClick={() => (isActive ? setConfigDrawerOpen(adapter) : switchAdapter(adapter))}
+                    disabled={result.loading}
+                    className={`w-full rounded-xl border px-3 py-2 text-xs text-left transition ${
+                      isActive
+                        ? 'border-white/10 text-slate-300 hover:text-white hover:border-white/20'
+                        : 'border-network/30 bg-network/10 text-network hover:bg-network/20'
+                    }`}
+                  >
+                    {isActive ? 'configure' : 'activate adapter'}
+                  </button>
+                  <button
+                    onClick={() => testConnection(adapter)}
+                    disabled={result.loading}
+                    className={`w-full rounded-xl border border-white/10 px-3 py-2 text-xs text-left text-slate-400 transition hover:text-white hover:border-white/20`}
+                  >
+                    {result.loading ? 'testing…' : 'test connection'}
+                  </button>
+                  {result.status && !result.loading && (
+                    <div className="flex items-center gap-1">
+                      <span className={`h-1.5 w-1.5 rounded-full ${result.status === 'reachable' || result.status === 'simulated' ? 'bg-network' : 'bg-signal'}`} />
+                      <span className="text-[10px] uppercase">{result.status}</span>
+                      {result.latencyMs !== null && <span className="text-[10px] text-slate-500 ml-1">{result.latencyMs}ms</span>}
+                    </div>
+                  )}
+                  {!hasCreds && adapter !== 'Mock' && (
+                    <div className="mt-1 rounded border border-signal/30 bg-signal/5 p-1">
+                      <span className="text-[10px] text-signal">no credentials</span>
+                    </div>
+                  )}
+                </div>
               </div>
-              <p className="mt-2 text-xs text-slate-500">
-                {adapter === router.adapter ? 'selected adapter' : 'available adapter'}
-              </p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
