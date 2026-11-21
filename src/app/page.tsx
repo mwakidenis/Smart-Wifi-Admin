@@ -310,30 +310,42 @@ export default function AdminPage() {
     setSelectedPackage(null);
   }
 
-  async function handleSavePackage(next: PackageRecord) {
+  async function handleSavePackage(next: PackageRecord): Promise<{ success: boolean; data?: PackageRecord; error?: { status: number; message: string } }> {
     try {
-      await updatePackage(next, adminApiKey || undefined);
-      void refresh();
-    } catch {
-      // fallback: optimistic UI handled by refresh
+      const result = await updatePackage(next, adminApiKey || undefined);
+      if (result.success) {
+        void refresh();
+        return { success: true, data: result.data };
+      }
+      return { success: false, error: result.error };
+    } catch (err) {
+      return { success: false, error: { status: 0, message: err instanceof Error ? err.message : 'Unknown error' } };
     }
   }
 
-  async function handleDuplicatePackage(next: PackageRecord) {
+  async function handleDuplicatePackage(next: PackageRecord): Promise<{ success: boolean; data?: PackageRecord; error?: { status: number; message: string } }> {
     try {
-      await createPackage(next, adminApiKey || undefined);
-      void refresh();
-    } catch {
-      // fallback: optimistic UI handled by refresh
+      const result = await createPackage(next, adminApiKey || undefined);
+      if (result.success) {
+        void refresh();
+        return { success: true, data: result.data };
+      }
+      return { success: false, error: result.error };
+    } catch (err) {
+      return { success: false, error: { status: 0, message: err instanceof Error ? err.message : 'Unknown error' } };
     }
   }
 
-  async function handleDeletePackage(id: string) {
+  async function handleDeletePackage(id: string): Promise<{ success: boolean; error?: { status: number; message: string } }> {
     try {
-      await deletePackage(id, adminApiKey || undefined);
-      void refresh();
-    } catch {
-      // fallback: optimistic UI handled by refresh
+      const result = await deletePackage(id, adminApiKey || undefined);
+      if (result.success) {
+        void refresh();
+        return { success: true };
+      }
+      return { success: false, error: result.error };
+    } catch (err) {
+      return { success: false, error: { status: 0, message: err instanceof Error ? err.message : 'Unknown error' } };
     }
   }
 

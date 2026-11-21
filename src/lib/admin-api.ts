@@ -40,6 +40,17 @@ export type TransactionRecord = {
   createdAt: string;
 };
 
+export type WorkerPackageResponse = {
+  version: string;
+  updatedAt: string;
+  packages: PackageRecord[];
+};
+
+export type PackageApiError = {
+  status: number;
+  message: string;
+};
+
 export type PackageRecord = {
   id: string;
   name: string;
@@ -177,7 +188,8 @@ function normalizeUsers(payload: unknown): UserRecord[] {
 }
 
 function normalizePackages(payload: unknown): PackageRecord[] {
-  const list = isRecord(payload) && Array.isArray(payload.packages) ? payload.packages : Array.isArray(payload) ? payload : [];
+  const wrapper = isRecord(payload) && Array.isArray((payload as Record<string, unknown>).packages) ? (payload as Record<string, unknown>).packages : null;
+  const list: unknown[] = wrapper ? (wrapper as unknown[]) : Array.isArray(payload) ? payload : [];
   if (list.length === 0) return fallbackPackages;
   return list.map((item, idx) => {
     const record = isRecord(item) ? item : {};
@@ -287,39 +299,97 @@ export async function getSupportMessages(): Promise<ApiResult<SupportMessage[]>>
   return { ...res, data: res.source === 'live' ? normalizeSupport(res.data) : fallbackSupport };
 }
 
-export async function updatePackage(patch: Partial<PackageRecord> & { id: string }, apiKey?: string): Promise<ApiResult<PackageRecord>> {
-  const res = await request<PackageRecord>(`/api/packages/${patch.id}`, fallbackPackages[0], 1, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-    },
-    body: JSON.stringify(patch),
-  });
-  if (res.source !== 'live') return { data: { ...fallbackPackages[0], ...patch }, source: 'offline', error: res.error };
-  return { data: { ...res.data, ...patch }, source: 'live' };
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-export async function deletePackage(id: string, apiKey?: string): Promise<ApiResult<void>> {
-  const res = await request<unknown>(`/api/packages/${id}`, null, 1, {
-    method: 'DELETE',
-    ...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}),
-  });
-  if (res.source !== 'live') return { data: undefined as unknown as void, source: 'offline', error: res.error };
-  return { data: undefined as unknown as void, source: 'live' };
+async function resolveBackendId(apiKey: string | undefined, uiId: string, uiName: string): Promise<string> {
+  const res = await request<unknown>('/api/packages', fallbackPackages, 1, apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined);
+  if (res.source !== 'live') return uiId;
+  const raw = isRecord(res.data) && Array.isArray((res.data as WorkerPackageResponse).packages)
+    ? (res.data as WorkerPackageResponse).packages
+    : Array.isArray(res.data) ? res.data : [];
+  const wrapper: unknown[] = raw;
+  const byExactId = wrapper.find((item) => isRecord(item) && asString((item as Record<string, unknown>).id) === uiId);
+  if (byExactId) return uiId;
+  const byName = wrapper.find((item) => isRecord(item) && asString((item as Record<string, unknown>).name).toLowerCase() === uiName.toLowerCase());
+  if (byName) return asString((byName as Record<string, unknown>).id);
+  const bySlug = wrapper.find((item) => isRecord(item) && slugify(asString((item as Record<string, unknown>).name)) === slugify(uiName));
+  if (bySlug) return asString((bySlug as Record<string, unknown>).id);
+  return uiId;
 }
 
-export async function createPackage(patch: Omit<PackageRecord, 'id'>, apiKey?: string): Promise<ApiResult<PackageRecord>> {
-  const res = await request<PackageRecord>('/api/packages', fallbackPackages[0], 1, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-    },
-    body: JSON.stringify(patch),
-  });
-  if (res.source !== 'live') return { data: { ...fallbackPackages[0], ...patch, id: `pkg_${Date.now()}` }, source: 'offline', error: res.error };
-  return { data: { ...res.data, ...patch, id: `pkg_${Date.now()}` }, source: 'live' };
+export async function updatePackage(patch: Partial<PackageRecord> & { id: string }, apiKey?: string): Promise<{ success: boolean; data?: PackageRecord; error?: PackageApiError }> {
+  const backendId = await resolveBackendId(apiKey, patch.id, patch.name || '');
+  try {
+    const response = await fetch(`${API_BASE}/api/packages/${backendId}`, {
+      method: 'PATCH',
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify({ ...patch, id: backendId }),
+    });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        error: { status: response.status, message: String((errorBody as Record<string, unknown>).error) || `HTTP ${response.status}` },
+      };
+    }
+    const json: unknown = await response.json();
+    const updated = isRecord(json) && isRecord(json.packages) ? (json.packages as unknown as unknown[]).find((p) => isRecord(p) && asString((p as Record<string, unknown>).id) === backendId) : json;
+    const normalized = isRecord(updated) ? normalizePackages([updated])[0] : { ...fallbackPackages[0], ...patch, id: backendId };
+    return { success: true, data: normalized };
+  } catch (err) {
+    return {
+      success: false,
+      error: { status: 0, message: err instanceof Error ? err.message : 'Network error' },
+    };
+  }
+}
+
+export async function deletePackage(id: string, apiKey?: string): Promise<{ success: boolean; error?: PackageApiError }> {
+  try {
+    const backendId = await resolveBackendId(apiKey, id, id);
+    const response = await fetch(`${API_BASE}/api/packages/${backendId}`, {
+      method: 'DELETE',
+      cache: 'no-store',
+      ...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}),
+    });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      return { success: false, error: { status: response.status, message: String((errorBody as Record<string, unknown>).error) || `HTTP ${response.status}` } };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: { status: 0, message: err instanceof Error ? err.message : 'Network error' } };
+  }
+}
+
+export async function createPackage(patch: Omit<PackageRecord, 'id'>, apiKey?: string): Promise<{ success: boolean; data?: PackageRecord; error?: PackageApiError }> {
+  try {
+    const response = await fetch(`${API_BASE}/api/packages`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify(patch),
+    });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      return { success: false, error: { status: response.status, message: String((errorBody as Record<string, unknown>).error) || `HTTP ${response.status}` } };
+    }
+    const json: unknown = await response.json();
+    const created = isRecord(json) ? json : {};
+    const normalized = normalizePackages([created])[0];
+    return { success: true, data: normalized };
+  } catch (err) {
+    return { success: false, error: { status: 0, message: err instanceof Error ? err.message : 'Network error' } };
+  }
 }
 
 export async function getAdminSnapshot(apiKey?: string): Promise<AdminSnapshot> {

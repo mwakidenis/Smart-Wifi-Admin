@@ -54,9 +54,9 @@ type ManagePackageDrawerProps = {
   packageItem: PackageRecord;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (next: PackageRecord, apiKey: string) => void;
-  onDuplicate: (next: PackageRecord, apiKey: string) => void;
-  onDelete: (id: string, apiKey: string) => void;
+  onSave: (next: PackageRecord, apiKey: string) => Promise<{ success: boolean; data?: PackageRecord; error?: { status: number; message: string } }>;
+  onDuplicate: (next: PackageRecord, apiKey: string) => Promise<{ success: boolean; data?: PackageRecord; error?: { status: number; message: string } }>;
+  onDelete: (id: string, apiKey: string) => Promise<{ success: boolean; error?: { status: number; message: string } }>;
   apiKey: string;
   setApiKey: (key: string) => void;
 };
@@ -205,28 +205,56 @@ export default function ManagePackageDrawer({
     if (errors[field]) setErrors((prev) => { const next = { ...prev }; delete next[field]; return next; });
   }, [errors]);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!validate()) return;
+    if (!apiKey.trim()) {
+      setToast({ message: 'Admin API key is required to save changes to the cloud catalog.', type: 'error' });
+      return;
+    }
     setSaving(true);
     const next = toRecord(form);
-    onSave(next, apiKey);
-    setToast({ message: `Package "${next.name}" saved`, type: 'success' });
+    const result = await onSave(next, apiKey);
     setSaving(false);
+    if (result.success) {
+      setToast({ message: `Package "${next.name}" saved to cloud catalog`, type: 'success' });
+    } else {
+      setToast({ message: `Save failed: ${result.error?.message || 'Unknown error'}`, type: 'error' });
+    }
   }, [form, validate, onSave, apiKey]);
 
-  const handleDuplicate = useCallback(() => {
+  const handleDuplicate = useCallback(async () => {
     if (!validate()) return;
+    if (!apiKey.trim()) {
+      setToast({ message: 'Admin API key is required to duplicate packages.', type: 'error' });
+      return;
+    }
+    setSaving(true);
     const clone = toRecord(form);
     const cloned: PackageRecord = { ...clone, id: `pkg_${Date.now()}`, name: `${clone.name} (Copy)`, isActive: false };
-    onDuplicate(cloned, apiKey);
-    setToast({ message: `Package duplicated as "${cloned.name}"`, type: 'success' });
+    const result = await onDuplicate(cloned, apiKey);
+    setSaving(false);
+    if (result.success) {
+      setToast({ message: `Package duplicated as "${cloned.name}"`, type: 'success' });
+    } else {
+      setToast({ message: `Duplicate failed: ${result.error?.message || 'Unknown error'}`, type: 'error' });
+    }
   }, [form, validate, onDuplicate, apiKey]);
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = useCallback(async () => {
     if (window.confirm(`Archive package "${form.name}"? This cannot be undone.`)) {
-      onDelete(form.id, apiKey);
-      onClose();
-      setToast({ message: `Package "${form.name}" archived`, type: 'success' });
+      if (!apiKey.trim()) {
+        setToast({ message: 'Admin API key is required to archive packages.', type: 'error' });
+        return;
+      }
+      setSaving(true);
+      const result = await onDelete(form.id, apiKey);
+      setSaving(false);
+      if (result.success) {
+        onClose();
+        setToast({ message: `Package "${form.name}" archived`, type: 'success' });
+      } else {
+        setToast({ message: `Archive failed: ${result.error?.message || 'Unknown error'}`, type: 'error' });
+      }
     }
   }, [form.id, form.name, onDelete, onClose, apiKey]);
 
