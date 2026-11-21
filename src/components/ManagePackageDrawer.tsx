@@ -54,9 +54,11 @@ type ManagePackageDrawerProps = {
   packageItem: PackageRecord;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (next: PackageRecord) => void;
-  onDuplicate: (next: PackageRecord) => void;
-  onDelete: (id: string) => void;
+  onSave: (next: PackageRecord, apiKey: string) => void;
+  onDuplicate: (next: PackageRecord, apiKey: string) => void;
+  onDelete: (id: string, apiKey: string) => void;
+  apiKey: string;
+  setApiKey: (key: string) => void;
 };
 
 const emptyForm: PackageFormData = {
@@ -154,6 +156,8 @@ export default function ManagePackageDrawer({
   onSave,
   onDuplicate,
   onDelete,
+  apiKey,
+  setApiKey,
 }: ManagePackageDrawerProps) {
   const [form, setForm] = useState<PackageFormData>(() => fromRecord(packageItem));
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -205,26 +209,26 @@ export default function ManagePackageDrawer({
     if (!validate()) return;
     setSaving(true);
     const next = toRecord(form);
-    onSave(next);
+    onSave(next, apiKey);
     setToast({ message: `Package "${next.name}" saved`, type: 'success' });
     setSaving(false);
-  }, [form, validate, onSave]);
+  }, [form, validate, onSave, apiKey]);
 
   const handleDuplicate = useCallback(() => {
     if (!validate()) return;
     const clone = toRecord(form);
     const cloned: PackageRecord = { ...clone, id: `pkg_${Date.now()}`, name: `${clone.name} (Copy)`, isActive: false };
-    onDuplicate(cloned);
+    onDuplicate(cloned, apiKey);
     setToast({ message: `Package duplicated as "${cloned.name}"`, type: 'success' });
-  }, [form, validate, onDuplicate]);
+  }, [form, validate, onDuplicate, apiKey]);
 
   const handleDelete = useCallback(() => {
     if (window.confirm(`Archive package "${form.name}"? This cannot be undone.`)) {
-      onDelete(form.id);
+      onDelete(form.id, apiKey);
       onClose();
       setToast({ message: `Package "${form.name}" archived`, type: 'success' });
     }
-  }, [form.id, form.name, onDelete, onClose]);
+  }, [form.id, form.name, onDelete, onClose, apiKey]);
 
   const handleReset = useCallback(() => {
     setForm(fromRecord(packageItem));
@@ -274,6 +278,20 @@ export default function ManagePackageDrawer({
               >
                 <X className="h-5 w-5" />
               </button>
+            </div>
+
+            <div className="px-6 py-4 border-b border-white/10">
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wider text-slate-500">admin API key (session token)</label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Bearer token from Worker dashboard"
+                  className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white focus:border-electric/60 outline-none bg-white/5"
+                />
+                <span className="text-[10px] text-slate-500">never hardcoded; entered per session</span>
+              </div>
             </div>
 
             <div className="p-6 overflow-y-auto max-h-[calc(100vh-3rem)]">
