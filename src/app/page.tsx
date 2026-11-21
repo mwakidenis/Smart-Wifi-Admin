@@ -129,6 +129,9 @@ export default function AdminPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState<PackageRecord | null>(null);
 
+  const adminApiKey = useStore((state) => state.adminApiKey);
+  const setAdminApiKeyStore = useStore((state) => state.setAdminApiKey);
+
   const ADAPTER_STORAGE_KEY = 'smart-wifi-active-adapter';
   const ADAPTER_CONFIG_STORAGE_KEY = 'smart-wifi-adapter-configs';
 
@@ -221,7 +224,7 @@ export default function AdminPage() {
   async function refresh() {
     setRefreshing(true);
     try {
-      const next = await getAdminSnapshot();
+      const next = await getAdminSnapshot(adminApiKey || undefined);
       setSnapshot(next);
       useStore.getState().initializeSnapshot(next);
       setLastUpdated(new Date());
@@ -309,7 +312,7 @@ export default function AdminPage() {
 
   async function handleSavePackage(next: PackageRecord) {
     try {
-      await updatePackage(next);
+      await updatePackage(next, adminApiKey || undefined);
       void refresh();
     } catch {
       // fallback: optimistic UI handled by refresh
@@ -318,7 +321,7 @@ export default function AdminPage() {
 
   async function handleDuplicatePackage(next: PackageRecord) {
     try {
-      await createPackage(next);
+      await createPackage(next, adminApiKey || undefined);
       void refresh();
     } catch {
       // fallback: optimistic UI handled by refresh
@@ -327,7 +330,7 @@ export default function AdminPage() {
 
   async function handleDeletePackage(id: string) {
     try {
-      await deletePackage(id);
+      await deletePackage(id, adminApiKey || undefined);
       void refresh();
     } catch {
       // fallback: optimistic UI handled by refresh
@@ -481,6 +484,8 @@ export default function AdminPage() {
             onSave={handleSavePackage}
             onDuplicate={handleDuplicatePackage}
             onDelete={handleDeletePackage}
+            apiKey={adminApiKey}
+            setApiKey={setAdminApiKeyStore}
           />
         )}
 
