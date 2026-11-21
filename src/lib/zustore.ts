@@ -20,6 +20,8 @@ export type AdminState = {
   setPackageBalance: (amount: number) => void;
   search: string;
   setSearch: (q: string) => void;
+  adminApiKey: string;
+  setAdminApiKey: (key: string) => void;
   snapshot: AdminSnapshot | null;
   initializeSnapshot: (next: AdminSnapshot) => void;
 };
@@ -33,6 +35,8 @@ export const useStore = create<AdminState>()(
       setPackageBalance: (packageBalance) => set({ packageBalance }),
       search: '',
       setSearch: (search) => set({ search }),
+      adminApiKey: '',
+      setAdminApiKey: (adminApiKey) => set({ adminApiKey }),
       snapshot: null,
       initializeSnapshot: (snapshot) => set({ snapshot }),
     }),
