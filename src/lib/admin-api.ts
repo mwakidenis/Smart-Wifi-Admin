@@ -287,6 +287,24 @@ export async function getSupportMessages(): Promise<ApiResult<SupportMessage[]>>
   return { ...res, data: res.source === 'live' ? normalizeSupport(res.data) : fallbackSupport };
 }
 
+export async function updatePackage(patch: Partial<PackageRecord> & { id: string }): Promise<ApiResult<PackageRecord>> {
+  const res = await request<PackageRecord>(`/packages/${patch.id}`, fallbackPackages[0], 1);
+  if (res.source !== 'live') return { data: { ...fallbackPackages[0], ...patch }, source: 'offline', error: res.error };
+  return { data: { ...res.data, ...patch }, source: 'live' };
+}
+
+export async function deletePackage(id: string): Promise<ApiResult<void>> {
+  const res = await request<unknown>(`/packages/${id}`, null, 1);
+  if (res.source !== 'live') return { data: undefined as unknown as void, source: 'offline', error: res.error };
+  return { data: undefined as unknown as void, source: 'live' };
+}
+
+export async function createPackage(patch: Omit<PackageRecord, 'id'>): Promise<ApiResult<PackageRecord>> {
+  const res = await request<PackageRecord>('/packages', fallbackPackages[0], 1);
+  if (res.source !== 'live') return { data: { ...fallbackPackages[0], ...patch, id: `pkg_${Date.now()}` }, source: 'offline', error: res.error };
+  return { data: { ...res.data, ...patch, id: `pkg_${Date.now()}` }, source: 'live' };
+}
+
 export async function getAdminSnapshot(): Promise<AdminSnapshot> {
   const [overview, users, transactions, packages, router, health, support] = await Promise.all([
     fetchOverview(),
