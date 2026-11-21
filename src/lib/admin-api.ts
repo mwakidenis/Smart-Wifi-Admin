@@ -231,11 +231,11 @@ function normalizeSupport(payload: unknown): SupportMessage[] {
   });
 }
 
-async function request<T>(path: string, fallback: T, attempts = DEFAULT_RETRIES): Promise<ApiResult<T>> {
+async function request<T>(path: string, fallback: T, attempts = DEFAULT_RETRIES, init?: RequestInit): Promise<ApiResult<T>> {
   let lastError = 'Request failed';
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+      const response = await fetch(`${API_BASE}${path}`, { cache: 'no-store', ...init });
       if (!response.ok) {
         lastError = `HTTP ${response.status}`;
       } else {
@@ -267,8 +267,8 @@ export async function fetchTransactions(): Promise<ApiResult<TransactionRecord[]
   return { ...res, data: res.source === 'live' ? normalizeTransactions(res.data) : fallbackTransactions };
 }
 
-export async function fetchPackages(): Promise<ApiResult<PackageRecord[]>> {
-  const res = await request<unknown>('/packages', fallbackPackages);
+export async function fetchPackages(apiKey?: string): Promise<ApiResult<PackageRecord[]>> {
+  const res = await request<unknown>('/api/packages', fallbackPackages, 2, apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : undefined);
   return { ...res, data: res.source === 'live' ? normalizePackages(res.data) : fallbackPackages };
 }
 
@@ -287,30 +287,47 @@ export async function getSupportMessages(): Promise<ApiResult<SupportMessage[]>>
   return { ...res, data: res.source === 'live' ? normalizeSupport(res.data) : fallbackSupport };
 }
 
-export async function updatePackage(patch: Partial<PackageRecord> & { id: string }): Promise<ApiResult<PackageRecord>> {
-  const res = await request<PackageRecord>(`/packages/${patch.id}`, fallbackPackages[0], 1);
+export async function updatePackage(patch: Partial<PackageRecord> & { id: string }, apiKey?: string): Promise<ApiResult<PackageRecord>> {
+  const res = await request<PackageRecord>(`/api/packages/${patch.id}`, fallbackPackages[0], 1, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify(patch),
+  });
   if (res.source !== 'live') return { data: { ...fallbackPackages[0], ...patch }, source: 'offline', error: res.error };
   return { data: { ...res.data, ...patch }, source: 'live' };
 }
 
-export async function deletePackage(id: string): Promise<ApiResult<void>> {
-  const res = await request<unknown>(`/packages/${id}`, null, 1);
+export async function deletePackage(id: string, apiKey?: string): Promise<ApiResult<void>> {
+  const res = await request<unknown>(`/api/packages/${id}`, null, 1, {
+    method: 'DELETE',
+    ...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}),
+  });
   if (res.source !== 'live') return { data: undefined as unknown as void, source: 'offline', error: res.error };
   return { data: undefined as unknown as void, source: 'live' };
 }
 
-export async function createPackage(patch: Omit<PackageRecord, 'id'>): Promise<ApiResult<PackageRecord>> {
-  const res = await request<PackageRecord>('/packages', fallbackPackages[0], 1);
+export async function createPackage(patch: Omit<PackageRecord, 'id'>, apiKey?: string): Promise<ApiResult<PackageRecord>> {
+  const res = await request<PackageRecord>('/api/packages', fallbackPackages[0], 1, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify(patch),
+  });
   if (res.source !== 'live') return { data: { ...fallbackPackages[0], ...patch, id: `pkg_${Date.now()}` }, source: 'offline', error: res.error };
   return { data: { ...res.data, ...patch, id: `pkg_${Date.now()}` }, source: 'live' };
 }
 
-export async function getAdminSnapshot(): Promise<AdminSnapshot> {
+export async function getAdminSnapshot(apiKey?: string): Promise<AdminSnapshot> {
   const [overview, users, transactions, packages, router, health, support] = await Promise.all([
     fetchOverview(),
     fetchUsers(),
     fetchTransactions(),
-    fetchPackages(),
+    fetchPackages(apiKey),
     fetchRouterStatus(),
     fetchHealth(),
     getSupportMessages(),
